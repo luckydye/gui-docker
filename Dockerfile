@@ -1,4 +1,4 @@
-FROM    ubuntu:18.04
+FROM ubuntu:22.04
 
 # for the VNC connection
 EXPOSE 5900
@@ -11,7 +11,7 @@ ENV VNC_PASSWD=123456
 ENV APT_INSTALL_PRE="apt -o Acquire::ForceIPv4=true update && DEBIAN_FRONTEND=noninteractive apt -o Acquire::ForceIPv4=true install -y --no-install-recommends"
 ENV APT_INSTALL_POST="&& apt clean -y && rm -rf /var/lib/apt/lists/*"
 # Make sure the dependencies are met
-RUN eval ${APT_INSTALL_PRE} tigervnc-standalone-server tigervnc-common fluxbox eterm xterm git net-tools python python-numpy ca-certificates scrot ${APT_INSTALL_POST}
+RUN eval ${APT_INSTALL_PRE} tigervnc-standalone-server tigervnc-common tigervnc-tools fluxbox eterm xterm git net-tools python-is-python3 python3 python3-numpy ca-certificates scrot ${APT_INSTALL_POST}
 
 # Install VNC. Requires net-tools, python and python-numpy
 RUN git clone --branch v1.2.0 --single-branch https://github.com/novnc/noVNC.git /opt/noVNC
@@ -32,6 +32,8 @@ ENV UID_OF_DOCKERUSER 1000
 RUN useradd -m -s /bin/bash -g users -u ${UID_OF_DOCKERUSER} dockerUser
 RUN chown -R dockerUser:users /home/dockerUser && chown dockerUser:users /opt
 
+RUN export DEBIAN_FRONTEND=noninteractive && apt update -y && apt install -y xfce4 xfce4-goodies
+
 USER dockerUser
 
 # Copy various files to their respective places
@@ -40,4 +42,114 @@ COPY --chown=dockerUser:users x11vnc_entrypoint.sh /opt/x11vnc_entrypoint.sh
 # Subsequent images can put their scripts to run at startup here
 RUN mkdir /opt/startup_scripts
 
-ENTRYPOINT ["/opt/container_startup.sh"]
+ENTRYPOINT ["bash", "/opt/container_startup.sh"]
+
+# OBS Setup
+########################
+
+USER root
+
+RUN export DEBIAN_FRONTEND=noninteractive \
+    && apt-get update -y \
+    && apt-get install -y git sudo software-properties-common checkinstall wget avahi-daemon \
+    && apt-get update -y \
+    && apt-get upgrade -y \
+    && apt clean all -y 
+
+# compile cmake
+RUN apt install -y build-essential libssl-dev && \
+    wget https://github.com/Kitware/CMake/releases/download/v3.20.2/cmake-3.20.2.tar.gz && \
+    tar -zxvf cmake-3.20.2.tar.gz && \
+    cd cmake-3.20.2 && \
+    ./bootstrap && \
+    make  && \
+    make install 
+
+# https://gist.github.com/Kusmeroglu/ef81c4f96369f890fcdc0616652430ad
+
+# compile srt
+RUN mkdir ~/ffmpeg_sources \
+    && cd ~/ffmpeg_sources \
+    && git clone --depth 1 https://github.com/Haivision/srt.git \
+    && mkdir srt/build \
+    && cd ~/ffmpeg_sources/srt/build \
+    && cmake -DENABLE_C_DEPS=ON -DENABLE_SHARED=ON -DENABLE_STATIC=OFF .. \
+    && make \
+    && make install
+
+# install ffmpeg dependencies
+RUN apt-get update -qq && apt-get -y install \
+  autoconf \
+  automake \
+  build-essential \
+  git-core \
+  libass-dev \
+  libfreetype6-dev \
+  libgnutls28-dev \
+  libsdl2-dev \
+  libtool \
+  libva-dev \
+  libvdpau-dev \
+  libvorbis-dev \
+  libxcb1-dev \
+  libxcb-shm0-dev \
+  libxcb-xfixes0-dev \
+  pkg-config \
+  texinfo \
+  wget \
+  curl \
+  yasm \
+  zlib1g-dev \
+  libx264-dev \
+  libx265-dev \
+  libnuma-dev \
+  libfdk-aac-dev \
+  libmp3lame-dev
+
+# compile ffmpeg
+RUN cd ~/ffmpeg_sources && \
+    wget -O ffmpeg-snapshot.tar.bz2 https://ffmpeg.org/releases/ffmpeg-snapshot.tar.bz2 && \
+    tar xjvf ffmpeg-snapshot.tar.bz2
+RUN cd ~/ffmpeg_sources/ffmpeg && \
+    PATH="$HOME/bin:$PATH" PKG_CONFIG_PATH="$HOME/ffmpeg_build/lib/pkgconfig" ./configure --prefix=/usr \
+                --enable-gpl         \
+                --enable-version3    \
+                --enable-nonfree     \
+                --disable-static     \
+                --enable-shared      \
+                --disable-debug      \
+                --enable-libfdk-aac  \
+                --enable-libfreetype \
+                --enable-libx264     \
+                --enable-libx265     \
+                --enable-protocol=libsrt \
+                --enable-libsrt && \
+    make && \
+    make install && \
+    hash -r && \
+    checkinstall -y --deldoc=yes && \
+    ldconfig
+    
+# install obs dependencies
+RUN add-apt-repository ppa:pipewire-debian/pipewire-upstream \
+    && apt-get update -y \
+    && apt install -y pipewire libnss3 \
+    && apt-get clean -y
+
+RUN cd ~ && git clone --recursive https://github.com/obsproject/obs-studio.git
+RUN cd ~/obs-studio && TERM=xterm CI/linux/01_install_dependencies.sh
+
+# compile OBS
+RUN mkdir ~/obs-studio/build
+RUN cd ~/obs-studio/build && \
+    cmake -DENABLE_NEW_MPEGTS_OUTPUT=OFF -DLINUX_PORTABLE=ON -DCMAKE_INSTALL_PREFIX="${HOME}/obs-studio-portable" -DENABLE_BROWSER=ON -DCEF_ROOT_DIR="../../obs-build-dependencies/cef_binary_5060_linux64" -DENABLE_AJA=OFF ..
+
+RUN export DEBIAN_FRONTEND=noninteractive && \
+    cd ~/obs-studio/build && \
+    make -j4 && \ 
+    checkinstall --default --pkgname=obs-studio --fstrans=no --backup=no --pkgversion="$(date +%Y%m%d)-git" --deldoc=yes
+
+RUN /etc/init.d/dbus start && /etc/init.d/avahi-daemon start
+
+RUN echo "?package(bash):needs=\"X11\" section=\"DockerCustom\" title=\"OBS Screencast\" command=\"obs\"" >> /usr/share/menu/custom-docker && update-menus
+
