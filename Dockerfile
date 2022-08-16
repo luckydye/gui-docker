@@ -152,7 +152,7 @@ RUN export DEBIAN_FRONTEND=noninteractive && \
 
 # install obs
 RUN mv /root/obs-studio-portable /usr/share/obs-studio
-RUN echo "#!/bin/bash \n cd /usr/share/obs-studio/bin/64bit && /usr/share/obs-studio/bin/64bit/obs" > /usr/bin/obs.sh && chmod 770 /usr/bin/obs.sh
+RUN echo "#!/bin/bash \n cd /usr/share/obs-studio/bin/64bit && /usr/share/obs-studio/bin/64bit/obs --user-data-dir=remote-profile --disable-web-security" > /usr/bin/obs.sh && chmod 770 /usr/bin/obs.sh
 
 # Install Custom Theme
 RUN git clone --branch develop https://github.com/luckydye/obs-modern.git
