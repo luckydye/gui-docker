@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:22.10
 
 # for the VNC connection
 EXPOSE 5900
@@ -131,25 +131,45 @@ RUN cd ~/ffmpeg_sources/ffmpeg && \
     ldconfig
     
 # install obs dependencies
-RUN add-apt-repository ppa:pipewire-debian/pipewire-upstream \
-    && apt-get update -y \
-    && apt install -y pipewire libnss3 \
+RUN  apt-get update -y \
+    && apt install -y libnss3 \
     && apt-get clean -y
 
 RUN cd ~ && git clone --recursive https://github.com/obsproject/obs-studio.git
 RUN cd ~/obs-studio && TERM=xterm CI/linux/01_install_dependencies.sh
 
+RUN apt install -y librist-dev
+
 # compile OBS
 RUN mkdir ~/obs-studio/build
 RUN cd ~/obs-studio/build && \
-    cmake -DENABLE_NEW_MPEGTS_OUTPUT=OFF -DLINUX_PORTABLE=ON -DCMAKE_INSTALL_PREFIX="${HOME}/obs-studio-portable" -DENABLE_BROWSER=ON -DCEF_ROOT_DIR="../../obs-build-dependencies/cef_binary_5060_linux64" -DENABLE_AJA=OFF ..
+    cmake -DENABLE_PIPEWIRE=OFF -DLINUX_PORTABLE=ON -DCMAKE_INSTALL_PREFIX="${HOME}/obs-studio-portable" -DENABLE_BROWSER=ON -DCEF_ROOT_DIR="../../obs-build-dependencies/cef_binary_5060_linux64" -DENABLE_AJA=0 ..
 
 RUN export DEBIAN_FRONTEND=noninteractive && \
     cd ~/obs-studio/build && \
     make -j4 && \ 
     checkinstall --default --pkgname=obs-studio --fstrans=no --backup=no --pkgversion="$(date +%Y%m%d)-git" --deldoc=yes
 
+# install obs
+RUN mv /root/obs-studio-portable /usr/share/obs-studio
+RUN echo "#!/bin/bash \n cd /usr/share/obs-studio/bin/64bit && /usr/share/obs-studio/bin/64bit/obs" > /usr/bin/obs.sh && chmod 770 /usr/bin/obs.sh
+
+# Install Custom Theme
+RUN git clone --branch develop https://github.com/luckydye/obs-modern.git
+RUN mv ./obs-modern/* /usr/share/obs-studio/data/obs-studio/themes/
+
+# Install NDI
+# RUN wget -q -O /tmp/libndi4_4.5.1-1_amd64.deb https://github.com/Palakis/obs-ndi/releases/download/4.9.1/libndi4_4.5.1-1_amd64.deb \
+# 	&& wget -q -O /tmp/obs-ndi_4.9.1-1_amd64.deb https://github.com/Palakis/obs-ndi/releases/download/4.9.1/obs-ndi_4.9.1-1_amd64.deb 
+# RUN dpkg -i /tmp/*.deb && rm -rf /tmp/*.deb
+
+# add VLC
+# RUN add-apt-repository "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc) universe" \
+#     && apt-get update -y \
+#     && apt-get install -y vlc
+
+
 RUN /etc/init.d/dbus start && /etc/init.d/avahi-daemon start
 
-RUN echo "?package(bash):needs=\"X11\" section=\"DockerCustom\" title=\"OBS Screencast\" command=\"obs\"" >> /usr/share/menu/custom-docker && update-menus
+RUN echo "?package(bash):needs=\"X11\" section=\"DockerCustom\" title=\"OBS Screencast\" command=\"obs.sh\"" >> /usr/share/menu/custom-docker && update-menus
 
