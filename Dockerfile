@@ -18,9 +18,6 @@ RUN git clone --branch v1.2.0 --single-branch https://github.com/novnc/noVNC.git
 RUN git clone --branch v0.9.0 --single-branch https://github.com/novnc/websockify.git /opt/noVNC/utils/websockify
 RUN ln -s /opt/noVNC/vnc.html /opt/noVNC/index.html
 
-# Add menu entries to the container
-RUN echo "?package(bash):needs=\"X11\" section=\"DockerCustom\" title=\"Xterm\" command=\"xterm -ls -bg black -fg white\"" >> /usr/share/menu/custom-docker && update-menus
-
 # Set timezone to UTC
 RUN ln -snf /usr/share/zoneinfo/UTC /etc/localtime && echo UTC > /etc/timezone
 
@@ -31,8 +28,6 @@ HEALTHCHECK --start-period=10s CMD bash -c "if [ \"`pidof -x Xtigervnc | wc -l`\
 ENV UID_OF_DOCKERUSER 1000
 RUN useradd -m -s /bin/bash -g users -u ${UID_OF_DOCKERUSER} dockerUser
 RUN chown -R dockerUser:users /home/dockerUser && chown dockerUser:users /opt
-
-RUN export DEBIAN_FRONTEND=noninteractive && apt update -y && apt install -y xfce4 xfce4-goodies
 
 USER dockerUser
 
@@ -51,19 +46,19 @@ USER root
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get update -y \
-    && apt-get install -y git sudo software-properties-common checkinstall wget avahi-daemon \
-    && apt-get update -y \
-    && apt-get upgrade -y \
+    && apt-get install -y git sudo libssl-dev build-essential software-properties-common checkinstall wget avahi-daemon \
     && apt clean all -y 
 
 # compile cmake
-RUN apt install -y build-essential libssl-dev && \
+RUN cd ~ && \
     wget https://github.com/Kitware/CMake/releases/download/v3.20.2/cmake-3.20.2.tar.gz && \
     tar -zxvf cmake-3.20.2.tar.gz && \
     cd cmake-3.20.2 && \
     ./bootstrap && \
     make  && \
     make install 
+
+RUN rm -R ~/cmake-3.20.2 && rm ~/cmake-3.20.2.tar.gz
 
 # https://gist.github.com/Kusmeroglu/ef81c4f96369f890fcdc0616652430ad
 
@@ -130,6 +125,8 @@ RUN cd ~/ffmpeg_sources/ffmpeg && \
     checkinstall -y --deldoc=yes && \
     ldconfig
     
+RUN rm -R ~/ffmpeg_sources
+
 # install obs dependencies
 RUN  apt-get update -y \
     && apt install -y libnss3 \
@@ -168,8 +165,12 @@ RUN mv ./obs-modern/* /usr/share/obs-studio/data/obs-studio/themes/
 #     && apt-get update -y \
 #     && apt-get install -y vlc
 
+# cleanup
+RUN rm -R ~/obs-build-dependencies
+RUN rm -R ~/obs-studio
+
+RUN apt clean all -y 
+
 
 RUN /etc/init.d/dbus start && /etc/init.d/avahi-daemon start
-
-RUN echo "?package(bash):needs=\"X11\" section=\"DockerCustom\" title=\"OBS Screencast\" command=\"obs.sh\"" >> /usr/share/menu/custom-docker && update-menus
 
